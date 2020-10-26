@@ -1,121 +1,44 @@
 package archiver
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"crypto/md5"
 	"encoding/hex"
-	"path/filepath"
-	"io"
 	"os"
 	"strings"
 	"log"
+	"bufio"
+	"backups/commands"
+	"backups/tarutils"
 )
 
+const ArchivePath = "/tmp/archiver"
 
-func tarFolder(src string, writers ...io.Writer) error {
-	info, err := os.Stat(src);
-	if err != nil {
-		return err
-	}
-
-	mw := io.MultiWriter(writers...)
-
-	gzipWriter := gzip.NewWriter(mw)
-	defer gzipWriter.Close()
-
-	tarWriter:= tar.NewWriter(gzipWriter)
-	defer tarWriter.Close()
-
-	var baseDir string
-	if info.IsDir() {
-		baseDir = filepath.Base(src)
-	}
-
-	return filepath.Walk(src, func(fileName string, fileInfo os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if !fileInfo.Mode().IsRegular() {
-			return nil
-		}
-
-		header, err := tar.FileInfoHeader(fileInfo, fileInfo.Name())
-
-		if err != nil {
-			return err
-		}
-
-		if baseDir != "" {
-			header.Name = filepath.Join(baseDir, strings.TrimPrefix(fileName, src))
-		}
-
-		if err := tarWriter.WriteHeader(header); err != nil {
-			return err
-		}
-
-		file, err := os.Open(fileName)
-
-		if err != nil {
-			return err
-		}
-
-		defer file.Close()
-		_, err = io.Copy(tarWriter, file)
-		log.Println("Adding ",fileName, header)
-		return err
-	})
+type Archiver struct {
+	md5s map[string]string
 }
 
-func untarFolder(dst string, r io.Reader) error {
+func NewArchiver() Archiver {
+	return Archiver{md5s: make(map[string]string)}
+}
 
-	gzipReader, err := gzip.NewReader(r)
-	if err != nil {
-		return err
-	}
-	defer gzipReader.Close()
-
-	tarReader := tar.NewReader(gzipReader)
-
-	for {
-		header, err := tarReader.Next()
-
-		switch {
-		case err == io.EOF:
-			return nil
-		case err != nil:
-			return err
-		case header == nil:
-			continue
-		}
-		target := filepath.Join(dst, header.Name)
-
-		switch header.Typeflag {
-
-		case tar.TypeDir:
-			if _, err := os.Stat(target); err != nil {
-				if err := os.MkdirAll(target, 0755); err != nil {
-					return err
-				}
-			}
-
-		case tar.TypeReg:
-			file, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
-			if err != nil {
-				return err
-			}
-
-			if _, err := io.Copy(file, tarReader); err != nil {
-				return err
-			}
-
-			file.Close()
-		}
+func (arch *Archiver) Transfer(archReq commands.Archive, writer *bufio.Writer) {
+	sourcePath := archReq.Path
+	tarPath := targetPath(sourcePath)
+	currentMD5, err := tar(sourcePath, tarPath)
+	log.Println("Archiver: archived path ",sourcePath, " md5 ", currentMD5, "err ", err)
+	if arch.md5s[sourcePath] == currentMD5 {
+		commands.WriteCommand(writer, commands.Acknowledge{})
+	} else {
+		sendFile(writer, sourcePath)
+		arch.md5s[sourcePath] = currentMD5
 	}
 }
 
-func Tar(path string, dst string) (string, error) {
+func targetPath(sourcePath string) string {
+	return  ArchivePath + "/" + strings.ReplaceAll(sourcePath, "/", "_")
+}
+
+func tar(path string, dst string) (string, error) {
 	file, err := os.Create(dst)
 	if err != nil {
 		return "", err
@@ -123,9 +46,25 @@ func Tar(path string, dst string) (string, error) {
 	defer file.Close()
 	log.Println("making tar gz for", path)
 	md5writer := md5.New()
-	err = tarFolder(path, file, md5writer)
+	err = tarutils.TarFolder(path, file, md5writer)
 	if err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(md5writer.Sum(nil)), nil
+}
+
+func sendFile(writer *bufio.Writer, tarPath string)  {
+	file, err:= os.Open(tarPath)
+	if err != nil {
+		commands.WriteCommand(writer, commands.Acknowledge{Err: err})
+		return
+	}
+	fi, err := file.Stat()
+	if err != nil {
+		commands.WriteCommand(writer, commands.Acknowledge{Err: err})
+		return
+	}
+	defer file.Close()
+	commands.WriteCommand(writer, commands.Transfer{Size: int(fi.Size()), Reader:file})
+	// TODO maybe delete file after transfer
 }

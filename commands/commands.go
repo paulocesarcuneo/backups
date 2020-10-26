@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	// "backups/storeregistry"
 )
 
 
@@ -25,6 +24,7 @@ type Register struct {
 type UnRegister struct {
 	Name string
 	Path string
+	Cause string
 }
 
 type History struct {
@@ -50,6 +50,19 @@ type Transfer struct {
 	Reader io.Reader
 }
 
+func (t* Transfer) WriteFile(location string) (string, error) {
+	file, err := os.Create(location)
+	if err != nil {
+		return "failure", err
+	}
+	defer file.Close()
+	_, err = io.CopyN(file, t.Reader, int64(t.Size))
+	if err != nil {
+		return "failure", err
+	}
+	return "ok", nil
+}
+
 type Acknowledge struct {
 	Err error
 }
@@ -69,6 +82,7 @@ var UnregisterInvalidFormat = errors.New("invalid format for unregister command"
 var HistoryInvalidFormat = errors.New("invalid format for history command")
 var UnknownCommand = errors.New("Unknown command")
 var TransferInvalidSize = errors.New("invalid size value")
+var UnableToHandle = errors.New("Unable to handle command")
 
 func tokenize(reader *bufio.Reader) (error, []string) {
 	data, err := reader.ReadString('.')
@@ -98,9 +112,14 @@ func ReadCommand(reader *bufio.Reader) (error, Command) {
 			Port:tokens[2],
 			Interval: interval}
 	case "UNREGISTER":
+		cause:=""
+		if len(tokens) == 3 {
+			cause = tokens[2]
+		}
 		return nil, UnRegister{
 			Name: tokens[0],
-			Path: tokens[1]}
+			Path: tokens[1],
+			Cause: cause }
 	case "HISTORY":
 		return nil, History{
 			Name:tokens[0],
@@ -129,7 +148,7 @@ func  WriteCommand(w *bufio.Writer, acmd Command) (int, error) {
 	case Register:
 		return w.WriteString("register,"+cmd.Name+","+cmd.Path+","+ cmd.Port+","+strconv.Itoa(cmd.Interval)+".")
 	case UnRegister:
-		return w.WriteString("unregister,"+cmd.Name+","+cmd.Path+".")
+		return w.WriteString("unregister,"+cmd.Name+","+cmd.Path+","+cmd.Cause+".")
 	case History:
 		return w.WriteString("history,"+cmd.Name+","+cmd.Path+".")
 	case Archive:

@@ -2,6 +2,7 @@ package storeregistry
 
 import (
 	"time"
+	"os"
 )
 
 type StoreEvent struct {
@@ -9,6 +10,7 @@ type StoreEvent struct {
 	Date time.Time
 	Path string
 	Node string
+	Status string
 	LocalPath string
 }
 
@@ -24,6 +26,13 @@ func (s StoreRegistry) FetchHistory(name, path string) []StoreEvent {
 	return nil
 }
 
+func (s * StoreRegistry) HouseKeep(e StoreEvent) {
+	history := s.Data[e.Node][e.Path]
+	oldest := history[0]
+	os.Remove(oldest.LocalPath)
+	s.Data[e.Node][e.Path] = history[1:]
+}
+
 func (s* StoreRegistry) Register(e StoreEvent) {
 	nodeData := s.Data[e.Node]
 	if nodeData == nil {
@@ -33,6 +42,7 @@ func (s* StoreRegistry) Register(e StoreEvent) {
 	history := nodeData[e.Path]
 	s.Data[e.Node][e.Path] = append(history, e)
 }
+
 func NewStoreRegistry() StoreRegistry {
 	return StoreRegistry{Data: make(map[string]map[string][]StoreEvent)}
 }

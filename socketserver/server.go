@@ -27,6 +27,7 @@ func ServeTCP(serverUrl string, workers int, handle func(*net.TCPConn)) error {
 				case conn := <- connections:
 					log.Println("server: Handling conn")
 					handle(conn)
+					conn.Close()
 				case <-quit:
 					log.Println("server: Shuting down socket worker", err)
 					break

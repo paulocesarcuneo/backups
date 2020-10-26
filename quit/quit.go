@@ -41,7 +41,6 @@ func filter(ss []string, test func(string) bool) (ret []string) {
 
 func UnSub(quitter chan interface{}) {
 	control.lock.Lock()
-	control.active = false
 	var updated []chan interface{} = nil
 	for _, ch := range control.subs {
 		if ch == quitter {

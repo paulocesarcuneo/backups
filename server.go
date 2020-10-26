@@ -9,11 +9,12 @@ import (
 	. "backups/storeregistry"
 	. "backups/synchronizer"
 	. "backups/commands"
+	"backups/config"
 	"bufio"
 	"log"
 	"net"
 	"io"
-	// "time"
+	"os"
 )
 
 func tcpHandle(reception chan Request) func(*net.TCPConn){
@@ -42,12 +43,13 @@ func tcpHandle(reception chan Request) func(*net.TCPConn){
 
 func main() {
 	quit := quit.Sub()
-	url:=":9000"
-	workers:= 4
+	if _, err := os.Stat(SyncFolder); os.IsNotExist(err) {
+		os.Mkdir(SyncFolder, os.ModePerm)
+	}
 	storeRegistry := NewStoreRegistry()
 	storekeeperChan := StoreKeeper(&storeRegistry)
-	directorChan := Director(storekeeperChan, Synchronizer)
+	directorChan := Director(storekeeperChan, SynchronizeTask)
 	receptionChan := Receptionist(directorChan, &storeRegistry)
-	server.ServeTCP(url, workers, tcpHandle(receptionChan))
+	server.ServeTCP(config.Config.ServerUrl,  config.Config.Threads, tcpHandle(receptionChan))
 	<-quit
 }

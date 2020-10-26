@@ -1,54 +1,50 @@
 package main
 
 import (
-	. "backups/commands"
+	"backups/commands"
 	"backups/quit"
 	"backups/archiver"
-	server "backups/socketserver"
+	"backups/socketserver"
 	"fmt"
 	"io"
 	"log"
-	"strings"
 	"os"
 	"bufio"
 	"net"
 )
 
-func tcpHandler(conn *net.TCPConn) {
+func archiveTCPHandler(conn *net.TCPConn) {
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
+	archiveMan := archiver.NewArchiver()
 	for {
-		err, cmd := ReadCommand(reader)
-		if err != nil {
-			if err == io.EOF {
-				break
+		err, cmd := commands.ReadCommand(reader)
+		switch {
+		case err == io.EOF:
+			break
+		case err != nil:
+			commands.WriteCommand(writer, commands.Acknowledge{Err: err})
+		default:
+			log.Println("client: handling ", cmd)
+			switch archRequest := cmd.(type) {
+			case commands.Archive:
+				archiveMan.Transfer(archRequest, writer)
+			default :
+				commands.WriteCommand(writer, commands.Acknowledge{Err: fmt.Errorf("Unhandled command")})
 			}
-			WriteCommand(writer, Acknowledge{Err: err})
-			continue
-		}
-		switch v:=cmd.(type) {
-		case Archive:
-			md5, err := archiver.Tar(v.Path, "/tmp/archiver/" + strings.ReplaceAll(v.Path, "/", "_"))
-			log.Printf("client: archived: ", md5, err)
-			content:= md5
-			WriteCommand(writer, Transfer{Size: len(content), Reader:strings.NewReader(content)})
-		default :
-			WriteCommand(writer, Acknowledge{Err: fmt.Errorf("Unhandled command")})
 		}
 		writer.Flush()
 	}
-	log.Println("client: tcp closed")
 }
 
 func main() {
-	log.Println(string(1))
 	url := ":9001"
 	workers := 4
 	path:= "/tmp/archiver"
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		os.Mkdir(path, os.ModePerm)
 	}
-	server.ServeTCP(url, workers, tcpHandler)
+	socketserver.ServeTCP(url, workers, archiveTCPHandler)
 	quit:= quit.Sub()
 	<-quit
 }

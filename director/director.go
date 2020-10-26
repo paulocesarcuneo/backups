@@ -10,7 +10,7 @@ import (
 )
 
 func Director(storekeeper chan StoreEvent,
-	sync func(Register, chan StoreEvent) chan Command) chan Command {
+	sync func(Register, chan StoreEvent, chan Command) chan Command) chan Command {
 	in:=make(chan Command)
 	go func() {
 		quit:= quit.Sub()
@@ -29,7 +29,7 @@ func Director(storekeeper chan StoreEvent,
 						node.In <- cmd
 						syncIn = node.In
 					} else {
-						syncIn = sync(cmd, storekeeper)
+						syncIn = sync(cmd, storekeeper, in)
 					}
 					registry.Add(cmd, syncIn)
 				case UnRegister:
