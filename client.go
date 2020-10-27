@@ -5,6 +5,7 @@ import (
 	"backups/quit"
 	"backups/archiver"
 	"backups/socketserver"
+	"backups/config"
 	"fmt"
 	"io"
 	"log"
@@ -38,13 +39,13 @@ func archiveTCPHandler(conn *net.TCPConn) {
 }
 
 func main() {
-	url := ":9001"
-	workers := 4
-	path:= "/tmp/archiver"
+	path:= archiver.ArchivePath
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		os.Mkdir(path, os.ModePerm)
 	}
-	socketserver.ServeTCP(url, workers, archiveTCPHandler)
+	socketserver.ServeTCP(config.Config.ClientUrl,
+		config.Config.Threads,
+		archiveTCPHandler)
 	quit:= quit.Sub()
 	<-quit
 }

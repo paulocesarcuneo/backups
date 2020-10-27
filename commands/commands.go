@@ -158,7 +158,6 @@ func  WriteCommand(w *bufio.Writer, acmd Command) (int, error) {
 		if err != nil {
 			return written, err
 		}
-		// TODO Fix written type, should be int64
 		writtenFile, err := io.CopyN(w, cmd.Reader, int64(cmd.Size))
 		return written + int(writtenFile), err
 	case Acknowledge:

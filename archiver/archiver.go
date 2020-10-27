@@ -29,7 +29,8 @@ func (arch *Archiver) Transfer(archReq commands.Archive, writer *bufio.Writer) {
 	if arch.md5s[sourcePath] == currentMD5 {
 		commands.WriteCommand(writer, commands.Acknowledge{})
 	} else {
-		sendFile(writer, sourcePath)
+		err:= sendFile(writer, tarPath)
+		log.Println("Archiver: Transfer ", err)
 		arch.md5s[sourcePath] = currentMD5
 	}
 }
@@ -53,18 +54,20 @@ func tar(path string, dst string) (string, error) {
 	return hex.EncodeToString(md5writer.Sum(nil)), nil
 }
 
-func sendFile(writer *bufio.Writer, tarPath string)  {
+func sendFile(writer *bufio.Writer, tarPath string) error  {
 	file, err:= os.Open(tarPath)
 	if err != nil {
 		commands.WriteCommand(writer, commands.Acknowledge{Err: err})
-		return
+		return  err
 	}
 	fi, err := file.Stat()
 	if err != nil {
 		commands.WriteCommand(writer, commands.Acknowledge{Err: err})
-		return
+		return err
 	}
 	defer file.Close()
-	commands.WriteCommand(writer, commands.Transfer{Size: int(fi.Size()), Reader:file})
+	_, err = commands.WriteCommand(writer,
+		commands.Transfer{Size: int(fi.Size()), Reader:file})
 	// TODO maybe delete file after transfer
+	return err
 }

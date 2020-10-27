@@ -34,9 +34,13 @@ func Director(storekeeper chan StoreEvent,
 					registry.Add(cmd, syncIn)
 				case UnRegister:
 					node := registry.Get(cmd.Name)
-					node.In <- cmd
-					log.Println("Director: unregister", cmd, node)
-					registry.Rem(cmd)
+					if node != nil {
+						node.In <- cmd
+						log.Println("Director: unregister", cmd, node)
+						registry.Rem(cmd)
+					} else {
+						log.Println("Director: unregister node doesnt exists", cmd)
+					}
 				default:
 					log.Println("Director: unable to handle command", cmd)
 				}

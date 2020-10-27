@@ -1,0 +1,19 @@
+version: "3.8"
+services:
+  server:
+    image: backups
+    build:
+      context: .
+    command: ./server
+
+  client:
+    image: backups
+    build:
+      context: .
+    command: ./client
+
+  client1:
+    image: backups
+    build:
+      context: .
+    command: ./client

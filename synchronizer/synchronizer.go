@@ -72,6 +72,7 @@ func SynchronizeTask(req Register, events chan StoreEvent, directorChan chan Com
 	in:= make(chan Command)
 	go func(){
 		q := quit.Sub()
+		log.Println("Synchronizer start:", req)
 		var synchroMan *Synchronizer
 		var err error
 		loop: for {
@@ -91,6 +92,7 @@ func SynchronizeTask(req Register, events chan StoreEvent, directorChan chan Com
 					log.Println("Synchronizer: unhandled command ", cmd)
 				}
 			case <-time.After(time.Duration(req.Interval) * time.Second):
+				log.Println("Synchronizer: syncing")
 				if synchroMan == nil {
 					synchroMan, err = NewSynchronizer(req)
 					if err != nil {
@@ -99,6 +101,7 @@ func SynchronizeTask(req Register, events chan StoreEvent, directorChan chan Com
 					}
 				}
 				event, err := synchroMan.sync()
+				log.Println("Synchronizer: event err ", event, err)
 				switch{
 				case err == io.EOF:
 					log.Println("Syncronizer: failed ", err)
@@ -108,6 +111,7 @@ func SynchronizeTask(req Register, events chan StoreEvent, directorChan chan Com
 					log.Println("Synchronizer: skip sync ", req)
 					continue loop
 				default:
+					log.Println("Synchronizer: synced", event)
 					events <- *event
 				}
 			}
