@@ -1,124 +1,81 @@
 package synchronizer
 
 import (
-	. "backups/commands"
-	. "backups/storeregistry"
+	"backups/commands"
+	"backups/noderegistry"
 	"backups/quit"
-	"bufio"
-	"io"
 	"log"
-	"net"
-	"strings"
+	"sync"
 	"time"
-	"strconv"
 )
 
-const SyncFolder = "/tmp/synchronizer"
+type StoreHandler func(commands.Command) commands.Command
 
 type Synchronizer struct {
-	archiverConn net.Conn
-	attemptRound int
-	register Register
+	NodeRegistry *noderegistry.Registry
+	Store        StoreHandler
+	Control      *quit.Control
+	Request      *chan commands.Command
+	lock         sync.Mutex
 }
 
-func NewSynchronizer(syncRequest Register) (*Synchronizer, error) {
-	conn, err := net.Dial("tcp", syncRequest.Port)
-	if err != nil {
-		return nil, err
+func (synchronizer *Synchronizer) sync(register commands.Register) {
+	client := synchronizer.NodeRegistry.Lease(register)
+
+	if client == nil {
+		return
 	}
-	return &Synchronizer{archiverConn: conn, attemptRound: 0, register: syncRequest}, nil
+
+	response, err := client.Send(commands.Archive{Path: register.Path})
+	if err != nil {
+		log.Println("Synchronizer: failed to archive ", err)
+	} else {
+		switch transfer := response.(type) {
+		case commands.Transfer:
+			storeResponse := synchronizer.Store(commands.Store{
+				Date:     time.Now(),
+				Name:     register.Name,
+				Path:     register.Path,
+				Transfer: transfer})
+			log.Println("Synchronizer: Store Response", storeResponse)
+		default:
+			log.Println("Synchronizer: Archive Response ", transfer)
+		}
+	}
+
+	if !synchronizer.NodeRegistry.Release(register) {
+		time.AfterFunc(time.Duration(register.Interval)*time.Second, func() {
+			*synchronizer.Request <- register
+		})
+	}
 }
 
-func (me *Synchronizer) sync() (*StoreEvent, error) {
-	reader := bufio.NewReader(me.archiverConn)
-	writer := bufio.NewWriter(me.archiverConn)
-	_, err := WriteCommand(writer, Archive{Path: me.register.Path})
-	if err != nil {
-		return nil, err
-	}
-	writer.Flush()
-	err, cmd := ReadCommand(reader)
-	if err != nil {
-		return nil, err
-	}
-	switch transfer :=cmd.(type) {
-	case Transfer:
-		timeOfTransfer := time.Now()
-		localPath := syncFileName(me.attemptRound, me.register.Path)
-		status, err := transfer.WriteFile(localPath)
-		me.attemptRound++
-		return &StoreEvent{Size:transfer.Size,
-			Date:timeOfTransfer,
-			Path:me.register.Path,
-			Node:me.register.Name,
-			Status: status,
-			LocalPath: localPath}, err
+func (synchronizer *Synchronizer) Handle(command interface{}) {
+	switch register := command.(type) {
+	case commands.Register:
+		log.Println("Synchronizer: register ", register)
+		synchronizer.sync(register)
 	default:
-		return nil, UnableToHandle
+		log.Println("Synchronizer: unhandled command")
 	}
-
 }
 
-func syncFileName(attemptRound int, path string) string {
-	return SyncFolder +"/"+ strconv.Itoa(attemptRound) + strings.ReplaceAll(path, "/", "_")
-}
-
-func (me *Synchronizer) Close() {
-	me.archiverConn.Close()
-}
-
-
-func SynchronizeTask(req Register, events chan StoreEvent, directorChan chan Command) chan Command {
-	in:= make(chan Command)
-	go func(){
-		q := quit.Sub()
-		log.Println("Synchronizer start:", req)
-		var synchroMan *Synchronizer
-		var err error
-		loop: for {
+func (synchronizer *Synchronizer) Launch() error {
+	quit, err := synchronizer.Control.Sub()
+	if err != nil {
+		return err
+	}
+	go func() {
+	loop:
+		for {
 			select {
-			case <-q:
+			case <-quit:
 				break loop
-			case cmd := <- in:
-				switch v:=cmd.(type) {
-				case Register:
-					log.Println("Synchronizer: updated ", req , " to ", v)
-					synchroMan.register = req
-				case UnRegister:
-					log.Println("Synchronizer: unregister ")
-					quit.UnSub(q)
-					break loop
-				default:
-					log.Println("Synchronizer: unhandled command ", cmd)
-				}
-			case <-time.After(time.Duration(req.Interval) * time.Second):
-				log.Println("Synchronizer: syncing")
-				if synchroMan == nil {
-					synchroMan, err = NewSynchronizer(req)
-					if err != nil {
-						log.Println("Synchronizer: can't connect ", req)
-						continue loop
-					}
-				}
-				event, err := synchroMan.sync()
-				log.Println("Synchronizer: event err ", event, err)
-				switch{
-				case err == io.EOF:
-					log.Println("Syncronizer: failed ", err)
-					// directorChan <- Unreachable{Name: req.Name, Path:req.Path, Cause: err.Error()}
-					continue loop
-				case event == nil && err != nil :
-					log.Println("Synchronizer: skip sync ", req)
-					continue loop
-				default:
-					log.Println("Synchronizer: synced", event)
-					events <- *event
-				}
+			case cmd := <-*synchronizer.Request:
+				synchronizer.Handle(cmd)
 			}
 		}
-		if synchroMan != nil {
-			synchroMan.Close()
-		}
+		quit <- true
 	}()
-	return in
+	return nil
 }

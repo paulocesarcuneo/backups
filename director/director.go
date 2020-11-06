@@ -1,51 +1,53 @@
 package director
 
-
 import (
-	. "backups/commands"
-	. "backups/storeregistry"
-	. "backups/noderegistry"
+	"backups/commands"
+	"backups/noderegistry"
 	"backups/quit"
 	"log"
 )
 
-func Director(storekeeper chan StoreEvent,
-	sync func(Register, chan StoreEvent, chan Command) chan Command) chan Command {
-	in:=make(chan Command)
+type Director struct {
+	SynchronizersIn *chan commands.Command
+	DirectorIn      chan commands.Command
+	NodeRegistry    *noderegistry.Registry
+	Control         *quit.Control
+}
+
+func (director *Director) Launch() {
 	go func() {
-		quit:= quit.Sub()
-		registry := NodeRegistry{Nodes: make(map[string]*NodeEntry)}
-		loop: for{
+		quit, err := director.Control.Sub()
+		if err != nil {
+			log.Println("Director: Launch failed ", err)
+			return
+		}
+		log.Println("Director: stated")
+	loop:
+		for {
 			select {
 			case <-quit:
 				break loop
-			case req :=<- in:
+			case req := <-director.DirectorIn:
+				log.Println("Director: req received")
 				switch cmd := req.(type) {
-				case Register:
+				case commands.Register:
 					log.Println("Director: register ", cmd)
-					var syncIn chan Command
-					node := registry.Get(cmd.Name)
-					if node != nil {
-						node.In <- cmd
-						syncIn = node.In
-					} else {
-						syncIn = sync(cmd, storekeeper, in)
+					err = director.NodeRegistry.Register(cmd)
+					if err != nil {
+						log.Println("Director: register failed", err)
+						continue
 					}
-					registry.Add(cmd, syncIn)
-				case UnRegister:
-					node := registry.Get(cmd.Name)
-					if node != nil {
-						node.In <- cmd
-						log.Println("Director: unregister", cmd, node)
-						registry.Rem(cmd)
-					} else {
-						log.Println("Director: unregister node doesnt exists", cmd)
+					*director.SynchronizersIn <- cmd
+				case commands.UnRegister:
+					err = director.NodeRegistry.UnRegister(cmd)
+					if err != nil {
+						log.Println("Director: unregister failed", err)
 					}
 				default:
 					log.Println("Director: unable to handle command", cmd)
 				}
 			}
 		}
+		quit <- true
 	}()
-	return in
 }

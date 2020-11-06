@@ -1,56 +1,33 @@
 package reception
 
-
 import (
-	. "backups/commands"
-	. "backups/storeregistry"
-	"backups/quit"
+	"backups/commands"
+	"backups/storeregistry"
 	"log"
-	"errors"
 )
 
-type Request struct {
-	Input Command
-	Output chan Command
+type Reception struct {
+	Director chan commands.Command
+	Store    *storeregistry.StoreRegistry
 }
 
-var UnhandledCommand = errors.New("Unable to handle request")
-func Receptionist(director chan Command, store *StoreRegistry) chan Request {
-	in:= make(chan Request)
-	go func(){
-		quitC := quit.Sub()
-		loop: for {
-			select{
-				case <-quitC:
-				break loop
-				case req := <-in:
-				switch cmd:= req.Input.(type) {
-				case Register:
-					log.Println("reception: handle register")
-					director <- cmd
-					req.Output <- Acknowledge{}
-				case UnRegister:
-					log.Println("reception: handle unregister")
-					director<- cmd
-					req.Output <- Acknowledge{}
-				case History:
-					log.Println("reception: handle history")
-					data := store.FetchHistory(cmd.Name, cmd.Path)
-					req.Output <- formatHistory(data)
-				default:
-					log.Println("Reception: unable to handle request", cmd)
-					req.Output<- Acknowledge{Err: UnhandledCommand}
-				}
-			}
-		}
-	}()
-	return in
-}
+const UnhandledCommand = "Reception: Unable to handle request"
 
-func formatHistory(history []StoreEvent) HistoryList {
-	var events []HistoryEntry
-	for _,se := range history {
-		events = append(events, HistoryEntry{Size:se.Size, Date: se.Date})
+func (reception *Reception) Handle(request commands.Command) commands.Command {
+	switch cmd := request.(type) {
+	case commands.Register:
+		log.Println("Reception: handle register")
+		reception.Director <- cmd
+		return commands.Acknowledge{}
+	case commands.UnRegister:
+		log.Println("Reception: handle unregister")
+		reception.Director <- cmd
+		return commands.Acknowledge{}
+	case commands.History:
+		log.Println("Reception: handle history")
+		return reception.Store.FetchHistory(cmd.Name, cmd.Path)
+	default:
+		log.Println("Reception: unable to handle request", cmd)
+		return commands.Error{Error: UnhandledCommand}
 	}
-	return HistoryList{Events:events}
 }

@@ -1,19 +1,19 @@
 version: "3.8"
 services:
-  server:
+  coordinator:
     image: backups
     build:
       context: .
-    command: ./server
+    command: ./coordinator
 
-  client:
+  node1:
     image: backups
     build:
       context: .
-    command: ./client
+    command: ./agent
 
-  client1:
+  node2:
     image: backups
     build:
       context: .
-    command: ./client
+    command: ./agent

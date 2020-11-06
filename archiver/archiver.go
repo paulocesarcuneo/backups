@@ -1,14 +1,13 @@
 package archiver
 
 import (
-	"crypto/md5"
-	"encoding/hex"
-	"os"
-	"strings"
-	"log"
-	"bufio"
 	"backups/commands"
 	"backups/tarutils"
+	"crypto/md5"
+	"encoding/hex"
+	"log"
+	"os"
+	"strings"
 )
 
 const ArchivePath = "/tmp/archiver"
@@ -21,22 +20,35 @@ func NewArchiver() Archiver {
 	return Archiver{md5s: make(map[string]string)}
 }
 
-func (arch *Archiver) Transfer(archReq commands.Archive, writer *bufio.Writer) {
+func (archiver *Archiver) Handle(request commands.Command) commands.Command {
+	switch archive := request.(type) {
+	case commands.Archive:
+		return archiver.transfer(archive)
+	default:
+		return commands.Error{Error: "Unhable to handle command"}
+	}
+}
+
+func (arch *Archiver) transfer(archReq commands.Archive) commands.Command {
 	sourcePath := archReq.Path
 	tarPath := targetPath(sourcePath)
 	currentMD5, err := tar(sourcePath, tarPath)
-	log.Println("Archiver: archived path ",sourcePath, " md5 ", currentMD5, "err ", err)
+	log.Println("Archiver: archived path ", sourcePath, " md5 ", currentMD5, "err ", err)
 	if arch.md5s[sourcePath] == currentMD5 {
-		commands.WriteCommand(writer, commands.Acknowledge{})
+		return commands.Acknowledge{}
 	} else {
-		err:= sendFile(writer, tarPath)
-		log.Println("Archiver: Transfer ", err)
+		result, err := openFileAsTransfer(tarPath)
+		if err != nil {
+			log.Println("Archiver: Transfer ", err)
+			return commands.Error{Error: err.Error()}
+		}
 		arch.md5s[sourcePath] = currentMD5
+		return result
 	}
 }
 
 func targetPath(sourcePath string) string {
-	return  ArchivePath + "/" + strings.ReplaceAll(sourcePath, "/", "_")
+	return ArchivePath + "/" + strings.ReplaceAll(sourcePath, "/", "_")
 }
 
 func tar(path string, dst string) (string, error) {
@@ -54,20 +66,26 @@ func tar(path string, dst string) (string, error) {
 	return hex.EncodeToString(md5writer.Sum(nil)), nil
 }
 
-func sendFile(writer *bufio.Writer, tarPath string) error  {
-	file, err:= os.Open(tarPath)
+func openFileAsTransfer(tarPath string) (commands.Command, error) {
+	file, err := os.Open(tarPath)
 	if err != nil {
-		commands.WriteCommand(writer, commands.Acknowledge{Err: err})
-		return  err
+		return nil, err
 	}
+
 	fi, err := file.Stat()
 	if err != nil {
-		commands.WriteCommand(writer, commands.Acknowledge{Err: err})
-		return err
+		return nil, err
 	}
-	defer file.Close()
-	_, err = commands.WriteCommand(writer,
-		commands.Transfer{Size: int(fi.Size()), Reader:file})
-	// TODO maybe delete file after transfer
-	return err
+
+	return commands.Transfer{
+		Size:   fi.Size(),
+		Reader: file,
+	}, nil
+}
+
+func init() {
+	path := ArchivePath
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		os.Mkdir(path, os.ModePerm)
+	}
 }

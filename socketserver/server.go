@@ -1,15 +1,23 @@
 package socketserver
 
 import (
+	"backups/quit"
 	"log"
 	"net"
-	"backups/quit"
 )
 
+type TCPConnHandler func(*net.TCPConn)
 
-func ServeTCP(serverUrl string, workers int, handle func(*net.TCPConn)) error {
-	log.Println("server: Starting Server.")
-	address, err := net.ResolveTCPAddr("tcp", serverUrl)
+type Server struct {
+	ListenURL string
+	Workers   int
+	Handle    TCPConnHandler
+	Control   *quit.Control
+}
+
+func (server *Server) Serve() error {
+	log.Println("Server: Starting...")
+	address, err := net.ResolveTCPAddr("tcp", server.ListenURL)
 	if err != nil {
 		return err
 	}
@@ -19,20 +27,26 @@ func ServeTCP(serverUrl string, workers int, handle func(*net.TCPConn)) error {
 	}
 
 	connections := make(chan *net.TCPConn)
-	for i:=0; i< workers; i++ {
+	for i := 0; i < server.Workers; i++ {
 		go func() {
-			quit := quit.Sub()
+			quit, err := server.Control.Sub()
+			if err != nil {
+				log.Println("Server: terminated before starting.")
+				return
+			}
+		loop:
 			for {
 				select {
-				case conn := <- connections:
-					log.Println("server: Handling conn")
-					handle(conn)
+				case conn := <-connections:
+					log.Println("Server: Handling conn.")
+					server.Handle(conn)
 					conn.Close()
 				case <-quit:
-					log.Println("server: Shuting down socket worker", err)
-					break
+					log.Println("Server: Shuting down worker.", err)
+					break loop
 				}
 			}
+			quit <- true
 		}()
 	}
 
@@ -40,17 +54,24 @@ func ServeTCP(serverUrl string, workers int, handle func(*net.TCPConn)) error {
 		for {
 			conn, err := ln.AcceptTCP()
 			if err != nil {
-				log.Println("server: Shuting down socket server", err)
+				log.Println("Server: Shuting down listener.", err)
 				break
 			}
 			connections <- conn
 		}
 	}()
 
-	quit := quit.Sub()
+	quit, err := server.Control.Sub()
+	if err != nil {
+		return err
+	}
+
 	go func() {
 		<-quit
+		log.Printf("Server: Shutting Down...")
 		ln.Close()
+		quit <- true
 	}()
+
 	return nil
 }
